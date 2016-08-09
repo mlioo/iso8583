@@ -1,3 +1,18 @@
+//Copyright 2015 ideazxy, Ivan Korostelyov
+//
+//
+//Licensed under the Apache License, Version 2.0 (the "License");
+//you may not use this file except in compliance with the License.
+//You may obtain a copy of the License at
+//
+//http://www.apache.org/licenses/LICENSE-2.0
+//
+//Unless required by applicable law or agreed to in writing, software
+//distributed under the License is distributed on an "AS IS" BASIS,
+//WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//See the License for the specific language governing permissions and
+//limitations under the License.
+
 package iso8583
 
 import (
@@ -14,6 +29,8 @@ const (
 	BCD
 	// rBCD is "right-aligned" BCD with odd length (for ex. "643" as [6 67] == "0643"), only for Numeric, Llnumeric and Lllnumeric fields
 	rBCD
+	// EBCDIC is a dinasour language used on IBM mainframes
+	EBCDIC
 )
 
 const (
@@ -150,7 +167,14 @@ func (a *Alphanumeric) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	if len(val) < length {
 		val = append([]byte(strings.Repeat(" ", length-len(val))), val...)
 	}
-	return val, nil
+	switch encoder {
+	case ASCII:
+		return val, nil
+	case EBCDIC:
+		return encodeEBCDIC(val), nil
+	default:
+		return val, nil
+	}
 }
 
 // Load decode Alphanumeric field from bytes
@@ -161,8 +185,16 @@ func (a *Alphanumeric) Load(raw []byte, encoder, lenEncoder, length int) (int, e
 	if len(raw) < length {
 		return 0, errors.New(ERR_BAD_RAW)
 	}
-	a.Value = string(raw[:length])
-	return length, nil
+	switch encoder {
+	case ASCII:
+		a.Value = string(raw[:length])
+		return length, nil
+	case EBCDIC:
+		a.Value = string(decodeEBCDIC(raw[:length]))
+		return length, nil
+	default:
+		return 0, errors.New(ERR_INVALID_ENCODER)
+	}
 }
 
 // Binary contains binary value
@@ -232,7 +264,10 @@ func (l *Llvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	if length != -1 && len(l.Value) > length {
 		return nil, errors.New(fmt.Sprintf(ERR_VALUE_TOO_LONG, "Llvar", length, len(l.Value)))
 	}
-	if encoder != ASCII {
+	switch encoder {
+	case EBCDIC:
+	case ASCII:
+	default:
 		return nil, errors.New(ERR_INVALID_ENCODER)
 	}
 
@@ -240,6 +275,8 @@ func (l *Llvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	contentLen := []byte(lenStr)
 	var lenVal []byte
 	switch lenEncoder {
+	case EBCDIC:
+		fallthrough
 	case ASCII:
 		lenVal = contentLen
 		if len(lenVal) > 2 {
@@ -255,7 +292,11 @@ func (l *Llvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	default:
 		return nil, errors.New(ERR_INVALID_LENGTH_ENCODER)
 	}
-	return append(lenVal, l.Value...), nil
+	if encoder == EBCDIC {
+		return append(lenVal, encodeEBCDIC(l.Value)...), nil
+	} else {
+		return append(lenVal, l.Value...), nil
+	}
 }
 
 // Load decode Llvar field from bytes
@@ -284,13 +325,19 @@ func (l *Llvar) Load(raw []byte, encoder, lenEncoder, length int) (read int, err
 		return 0, errors.New(ERR_BAD_RAW)
 	}
 	// parse body:
-	l.Value = raw[read : read+contentLen]
-	read += contentLen
-	if encoder != ASCII {
+	switch encoder {
+	case ASCII:
+		l.Value = raw[read : read+contentLen]
+		read += contentLen
+		return read, nil
+	case EBCDIC:
+		l.Value = decodeEBCDIC(raw[read : read+contentLen])
+		read += contentLen
+		return read, nil
+	default:
 		return 0, errors.New(ERR_INVALID_ENCODER)
 	}
 
-	return read, nil
 }
 
 // A Llnumeric contains numeric value only in non-fix length, contains length in first 2 symbols. It holds numeric
@@ -416,7 +463,10 @@ func (l *Lllvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	if length != -1 && len(l.Value) > length {
 		return nil, errors.New(fmt.Sprintf(ERR_VALUE_TOO_LONG, "Lllvar", length, len(l.Value)))
 	}
-	if encoder != ASCII {
+	switch encoder {
+	case EBCDIC:
+	case ASCII:
+	default:
 		return nil, errors.New(ERR_INVALID_ENCODER)
 	}
 
@@ -424,6 +474,8 @@ func (l *Lllvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	contentLen := []byte(lenStr)
 	var lenVal []byte
 	switch lenEncoder {
+	case EBCDIC:
+		fallthrough
 	case ASCII:
 		lenVal = contentLen
 		if len(lenVal) > 3 {
@@ -439,7 +491,12 @@ func (l *Lllvar) Bytes(encoder, lenEncoder, length int) ([]byte, error) {
 	default:
 		return nil, errors.New(ERR_INVALID_LENGTH_ENCODER)
 	}
-	return append(lenVal, l.Value...), nil
+	if encoder == EBCDIC {
+		return append(lenVal, encodeEBCDIC(l.Value)...), nil
+	} else {
+		return append(lenVal, l.Value...), nil
+	}
+
 }
 
 // Load decode Lllvar field from bytes
@@ -468,13 +525,19 @@ func (l *Lllvar) Load(raw []byte, encoder, lenEncoder, length int) (read int, er
 		return 0, errors.New(ERR_BAD_RAW)
 	}
 	// parse body:
-	l.Value = raw[read : read+contentLen]
-	read += contentLen
-	if encoder != ASCII {
+	switch encoder {
+	case EBCDIC:
+		l.Value = decodeEBCDIC(raw[read : read+contentLen])
+		read += contentLen
+		return read, nil
+	case ASCII:
+		l.Value = raw[read : read+contentLen]
+		read += contentLen
+		return read, nil
+	default:
 		return 0, errors.New(ERR_INVALID_ENCODER)
 	}
 
-	return read, nil
 }
 
 // A Lllnumeric contains numeric value only in non-fix length, contains length in first 3 symbols. It holds numeric
